@@ -1,0 +1,108 @@
+{
+  "title": "Jesus, You're My One Thing",
+  "artist": "Sean Slayton",
+  "_notes": "Times are in seconds from the start of the song. Each line stays on screen until the next line starts (or until its section's `end`). Nudge a `t` value, then run `node build.mjs` to regenerate index.html.",
+  "sections": [
+    {
+      "id": "verse-1", "mood": "verse", "start": 18.8, "end": 46.8,
+      "lines": [
+        { "t": 19.2, "text": "I want my life to be" },
+        { "t": 23.2, "text": "one that's honoring" },
+        { "t": 26.1, "text": "to the sacrifice You gave me" },
+        { "t": 33.6, "text": "How can I do less" },
+        { "t": 36.3, "text": "for Your love and faithfulness" },
+        { "t": 40.6, "text": "You gave me, undeserving" }
+      ]
+    },
+    {
+      "id": "chorus-1", "mood": "chorus", "start": 46.8, "end": 75.9,
+      "lines": [
+        { "t": 47.06, "text": "Jesus, You're my one thing" },
+        { "t": 52.06, "text": "Your love, it makes my heart sing" },
+        { "t": 58.56, "text": "Jesus, You're my one thing" },
+        { "t": 65.36, "text": "Jesus, You're my heartbeat", "ecg": true },
+        { "t": 68.36, "text": "Give me strength to go where You lead" },
+        { "t": 72.86, "text": "Jesus, You're my heartbeat", "ecg": true }
+      ]
+    },
+    { "id": "interlude-1", "mood": "interlude", "start": 75.9, "end": 86.2, "lines": [] },
+    {
+      "id": "verse-2", "mood": "verse", "start": 86.2, "end": 114.2,
+      "lines": [
+        { "t": 86.9, "text": "I want to be a new" },
+        { "t": 90.3, "text": "creation just for You" },
+        { "t": 93.0, "text": "Your love is so transforming" },
+        { "t": 100.9, "text": "You set my heart on fire" },
+        { "t": 104.5, "text": "Your true love so inspires" },
+        { "t": 108.6, "text": "I have joy in Your salvation" }
+      ]
+    },
+    {
+      "id": "chorus-2", "mood": "chorus", "start": 114.2, "end": 142.6,
+      "lines": [
+        { "t": 114.45, "text": "Jesus, You're my one thing" },
+        { "t": 119.45, "text": "Your love, it makes my heart sing" },
+        { "t": 125.95, "text": "Jesus, You're my one thing" },
+        { "t": 132.75, "text": "Jesus, You're my heartbeat", "ecg": true },
+        { "t": 135.75, "text": "Give me strength to go where You lead" },
+        { "t": 140.25, "text": "Jesus, You're my heartbeat", "ecg": true }
+      ]
+    },
+    {
+      "id": "chorus-3", "mood": "chorus", "start": 142.6, "end": 171.6,
+      "lines": [
+        { "t": 142.82, "text": "Jesus, You're my one thing" },
+        { "t": 147.82, "text": "Your love, it makes my heart sing" },
+        { "t": 154.32, "text": "Jesus, You're my one thing" },
+        { "t": 161.12, "text": "Jesus, You're my heartbeat", "ecg": true },
+        { "t": 164.12, "text": "Give me strength to go where You lead" },
+        { "t": 168.62, "text": "Jesus, You're my heartbeat", "ecg": true }
+      ]
+    },
+    { "id": "interlude-2", "mood": "interlude", "start": 171.6, "end": 178.0, "lines": [] },
+    {
+      "id": "bridge", "mood": "bridge", "start": 178.0, "end": 220.6,
+      "lines": [
+        { "t": 178.26, "text": "Here I am, Lord" },
+        { "t": 182.06, "text": "I am broken" },
+        { "t": 185.66, "text": "Take me as I am" },
+        { "t": 192.43, "text": "Here I am, Lord" },
+        { "t": 196.23, "text": "I am broken" },
+        { "t": 199.83, "text": "Take me as I am" },
+        { "t": 206.64, "text": "Here I am, Lord" },
+        { "t": 210.44, "text": "I am broken" },
+        { "t": 214.04, "text": "Take me as I am" }
+      ]
+    },
+    {
+      "id": "bridge-rise", "mood": "rise", "start": 220.6, "end": 234.8,
+      "lines": [
+        { "t": 220.8, "text": "Jesus, Jesus" },
+        { "t": 229.9, "text": "Mighty Savior" },
+        { "t": 232.6, "text": "You are my first love" }
+      ]
+    },
+    {
+      "id": "chorus-4", "mood": "chorus", "start": 234.8, "end": 263.8,
+      "lines": [
+        { "t": 235.0, "text": "Jesus, You're my one thing" },
+        { "t": 240.0, "text": "Your love, it makes my heart sing" },
+        { "t": 246.5, "text": "Jesus, You're my one thing" },
+        { "t": 253.3, "text": "Jesus, You're my heartbeat", "ecg": true },
+        { "t": 256.3, "text": "Give me strength to go where You lead" },
+        { "t": 260.8, "text": "Jesus, You're my heartbeat", "ecg": true }
+      ]
+    },
+    {
+      "id": "chorus-5", "mood": "outro", "start": 263.8, "end": 296.4,
+      "lines": [
+        { "t": 265.6, "text": "Jesus, You're my one thing" },
+        { "t": 272.9, "text": "Your love, it makes my heart sing" },
+        { "t": 278.4, "text": "Jesus, You're my one thing" },
+        { "t": 285.6, "text": "Jesus, You're my heartbeat", "ecg": true },
+        { "t": 288.4, "text": "Give me strength to go where You lead" },
+        { "t": 292.5, "text": "Jesus, You're my heartbeat", "ecg": true }
+      ]
+    }
+  ]
+}

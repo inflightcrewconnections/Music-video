@@ -1,0 +1,326 @@
+#!/usr/bin/env node
+// Generates index.html (the HyperFrames composition) from lyrics.json + audiomap.json.
+// Edit lyric timings in lyrics.json, then run: node build.mjs
+import { readFileSync, writeFileSync } from "node:fs";
+
+const song = JSON.parse(readFileSync(new URL("./lyrics.json", import.meta.url)));
+const audiomap = JSON.parse(readFileSync(new URL("./audiomap.json", import.meta.url)));
+
+const DURATION = audiomap.audio.duration_sec; // 299.8
+const W = 1920;
+const H = 1080;
+const LEAD = 0.25; // a line starts appearing this long before it is sung
+const INTRO_END = 18.6;
+const OUTRO_START = 296.3;
+
+// ---------------------------------------------------------------------------
+// Mood → light levels for each background layer. The timeline cross-fades
+// between these at every section boundary.
+const MOODS = {
+  intro:     { dawn: 0.25, gold: 0.0,  candle: 0.0, rays: 0.12, cross: 0.0,  heart: 0.0  },
+  verse:     { dawn: 0.6,  gold: 0.0,  candle: 0.0, rays: 0.22, cross: 0.0,  heart: 0.15 },
+  chorus:    { dawn: 0.55, gold: 1.0,  candle: 0.0, rays: 0.75, cross: 0.0,  heart: 1.0  },
+  interlude: { dawn: 0.85, gold: 0.35, candle: 0.0, rays: 0.4,  cross: 0.0,  heart: 0.3  },
+  bridge:    { dawn: 0.0,  gold: 0.0,  candle: 1.0, rays: 0.08, cross: 0.4,  heart: 0.0  },
+  rise:      { dawn: 0.2,  gold: 0.55, candle: 1.0, rays: 0.55, cross: 0.9,  heart: 0.4  },
+  outro:     { dawn: 0.6,  gold: 0.6,  candle: 0.0, rays: 0.45, cross: 0.0,  heart: 0.7  },
+  end:       { dawn: 0.3,  gold: 0.15, candle: 0.0, rays: 0.12, cross: 0.0,  heart: 0.0  },
+};
+const LAYERS = Object.keys(MOODS.intro);
+
+// Mood timeline: [time, mood]
+const moodMarks = [[0, "intro"]];
+for (const s of song.sections) moodMarks.push([s.start, s.mood]);
+moodMarks.push([OUTRO_START - 1.5, "end"]);
+
+// ---------------------------------------------------------------------------
+// Lyric lines with display windows.
+const lines = [];
+const flat = song.sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s })));
+flat.forEach((l, i) => {
+  const next = flat[i + 1];
+  const start = +(l.t - LEAD).toFixed(3);
+  let end = l.section.end;
+  if (next) end = Math.min(end, next.t - LEAD);
+  end = Math.min(end, OUTRO_START);
+  lines.push({ ...l, start, end: +end.toFixed(3), idx: i });
+});
+
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const fontSize = (text) => (text.length <= 22 ? 124 : text.length <= 30 ? 108 : 94);
+
+function lineHtml(l) {
+  const words = l.text.split(" ").map((w) => {
+    const gold = /^Jesus/.test(w) ? " gold" : "";
+    return `<span class="w${gold}">${esc(w)}</span>`;
+  });
+  const ecg = l.ecg
+    ? `<svg class="ecg" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true"><path id="ecg-${l.idx}" d="M0 60 H430 L462 60 L480 40 L498 60 L520 60 L540 8 L566 112 L590 30 L606 60 L640 60 L662 46 L684 60 H1200" /></svg>`
+    : "";
+  return `      <div id="ly-${l.idx}" class="clip lyric mood-${l.section.mood}" data-start="${l.start}" data-duration="${(l.end - l.start).toFixed(3)}" data-track-index="3">
+        <div class="line-wrap" id="lw-${l.idx}"><div class="line" style="font-size:${fontSize(l.text)}px">${words.join(" ")}</div>${ecg}</div>
+      </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Heartbeats: a "lub-dub" pulse every other beat (the song sits at ~68 BPM,
+// a resting heart rate) inside chorus-type sections.
+const pulseSections = song.sections.filter((s) => s.mood === "chorus" || s.mood === "outro");
+const beats = audiomap.grid.beats_sec;
+const heartbeats = beats.filter((b, i) => i % 2 === 1 && pulseSections.some((s) => b >= s.start && b < s.end - 0.6));
+
+// Seeded PRNG so the dust motes are identical on every render.
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(316);
+const motes = Array.from({ length: 64 }, (_, i) => {
+  const size = 2 + rand() * 6;
+  return {
+    i,
+    x: Math.round(rand() * W),
+    size: +size.toFixed(1),
+    blur: +(size > 5 ? 2.5 : rand() * 1.2).toFixed(1),
+    alpha: +(0.25 + rand() * 0.55).toFixed(2),
+    phase: +rand().toFixed(3),
+    speed: +(18 + rand() * 26).toFixed(1), // seconds to cross the screen
+    drift: Math.round((rand() - 0.5) * 240),
+  };
+});
+
+// ---------------------------------------------------------------------------
+const data = {
+  DURATION, INTRO_END, OUTRO_START, MOODS, LAYERS, moodMarks,
+  lines: lines.map(({ idx, start, end, ecg }) => ({ idx, start, end, ecg: !!ecg })),
+  heartbeats, motes,
+};
+
+const html = `<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=${W}, height=${H}" />
+    <title>${esc(song.title)} — ${esc(song.artist)} (Lyric Video)</title>
+    <!-- Generated by build.mjs from lyrics.json — edit those, not this file. -->
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "Cormorant Garamond"; font-weight: 500; font-style: normal; src: url("assets/fonts/cormorant-garamond-latin-500-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Cormorant Garamond"; font-weight: 600; font-style: normal; src: url("assets/fonts/cormorant-garamond-latin-600-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Cormorant Garamond"; font-weight: 500; font-style: italic; src: url("assets/fonts/cormorant-garamond-latin-500-italic.woff2") format("woff2"); }
+      @font-face { font-family: "Cormorant Garamond"; font-weight: 600; font-style: italic; src: url("assets/fonts/cormorant-garamond-latin-600-italic.woff2") format("woff2"); }
+      @font-face { font-family: "Montserrat"; font-weight: 300; src: url("assets/fonts/montserrat-latin-300-normal.woff2") format("woff2"); }
+      @font-face { font-family: "Montserrat"; font-weight: 500; src: url("assets/fonts/montserrat-latin-500-normal.woff2") format("woff2"); }
+
+      :root {
+        --ivory: #fbf1dc;
+        --gold: #f3c46a;
+        --gold-deep: #d9963a;
+        --night: #0b0d24;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: ${W}px; height: ${H}px; overflow: hidden; background: var(--night); }
+      body { font-family: "Cormorant Garamond", serif; color: var(--ivory); }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--night); }
+      .clip { position: absolute; inset: 0; }
+
+      /* ---------- light & atmosphere ---------- */
+      .layer { position: absolute; inset: 0; pointer-events: none; }
+      #bg-night {
+        background:
+          radial-gradient(120% 80% at 50% 110%, #2a1d4a 0%, rgba(42,29,74,0) 60%),
+          linear-gradient(180deg, #070919 0%, #0e1233 55%, #1c1740 100%);
+      }
+      #bg-dawn {
+        background:
+          radial-gradient(90% 60% at 50% 105%, rgba(233,128,120,0.75) 0%, rgba(160,80,130,0.35) 40%, rgba(40,30,80,0) 75%),
+          linear-gradient(180deg, rgba(20,22,60,0) 30%, rgba(92,48,104,0.55) 100%);
+      }
+      #bg-gold {
+        background:
+          radial-gradient(60% 55% at 50% 48%, rgba(255,214,140,0.4) 0%, rgba(240,160,80,0.24) 35%, rgba(120,60,90,0) 70%),
+          radial-gradient(110% 70% at 50% 110%, rgba(255,170,90,0.6) 0%, rgba(200,90,90,0) 60%),
+          linear-gradient(180deg, #1b1438 0%, #4a2a4e 60%, #7a3f45 100%);
+      }
+      #bg-candle {
+        background:
+          radial-gradient(38% 42% at 50% 62%, rgba(255,176,96,0.42) 0%, rgba(160,80,40,0.14) 45%, rgba(0,0,0,0) 75%),
+          linear-gradient(180deg, #050409 0%, #0d0911 70%, #170d10 100%);
+      }
+      #rays-wrap { position: absolute; left: 50%; top: -900px; width: 0; height: 0; }
+      #rays {
+        position: absolute; left: -1500px; top: -1500px; width: 3000px; height: 3000px; border-radius: 50%;
+        background: repeating-conic-gradient(from 0deg, rgba(255,226,170,0.16) 0deg 3deg, rgba(255,226,170,0) 5deg 14deg);
+        -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 18%, rgba(0,0,0,0.5) 38%, rgba(0,0,0,0) 62%);
+        mask-image: radial-gradient(circle at 50% 50%, #000 18%, rgba(0,0,0,0.5) 38%, rgba(0,0,0,0) 62%);
+        filter: blur(6px);
+      }
+      #heart-glow-wrap { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+      #heart-glow {
+        position: absolute; left: -620px; top: -380px; width: 1240px; height: 760px; border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(255,205,130,0.34), rgba(255,160,110,0.12) 55%, rgba(255,160,110,0) 100%);
+      }
+      #cross { position: absolute; left: 50%; top: 0; width: 0; height: 0; }
+      #cross .beam { position: absolute; border-radius: 6px; filter: blur(3px);
+        background: linear-gradient(180deg, rgba(255,222,160,0) 0%, rgba(255,222,160,0.85) 30%, rgba(255,222,160,0.85) 70%, rgba(255,222,160,0) 100%); }
+      #cross .v { left: -4px; top: 90px; width: 8px; height: 900px; }
+      #cross .h { left: -290px; top: 330px; width: 580px; height: 8px;
+        background: linear-gradient(90deg, rgba(255,222,160,0) 0%, rgba(255,222,160,0.85) 25%, rgba(255,222,160,0.85) 75%, rgba(255,222,160,0) 100%); }
+      #cross .halo { left: -420px; top: -40px; width: 840px; height: 840px; border-radius: 50%; filter: blur(30px);
+        background: radial-gradient(closest-side, rgba(255,210,150,0.22), rgba(255,210,150,0)); }
+      .mote { position: absolute; top: ${H + 20}px; border-radius: 50%; background: rgba(255,236,200,0.95); }
+      #vignette { background: radial-gradient(ellipse 85% 75% at 50% 50%, rgba(0,0,0,0) 55%, rgba(3,2,10,0.72) 100%); }
+
+      /* ---------- lyrics ---------- */
+      .lyric { display: flex; align-items: center; justify-content: center; }
+      .line-wrap { position: relative; display: block; width: 1600px; text-align: center; }
+      .line {
+        display: block; width: 100%; font-weight: 600; line-height: 1.12; letter-spacing: 0.005em;
+        color: var(--ivory);
+        text-shadow: 0 0 3px rgba(30,14,28,0.45), 0 0 28px rgba(255,210,140,0.3), 0 2px 18px rgba(10,6,30,0.7);
+      }
+      .w { display: inline-block; }
+      .w.gold { color: var(--gold); font-style: italic; text-shadow: 0 0 34px rgba(255,190,90,0.55), 0 2px 18px rgba(10,6,30,0.6); }
+      .mood-bridge .line { font-weight: 500; font-style: italic; letter-spacing: 0.02em; }
+      .ecg { position: absolute; left: 200px; top: calc(100% + 18px); width: 1200px; height: 120px; overflow: visible; }
+      .ecg path { fill: none; stroke: var(--gold); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round;
+        filter: drop-shadow(0 0 10px rgba(255,190,90,0.9)); }
+
+      /* ---------- title cards ---------- */
+      .card { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+      .card-inner { display: flex; flex-direction: column; align-items: center; }
+      .kicker { font-family: "Montserrat", sans-serif; font-weight: 500; font-size: 30px; letter-spacing: 0.55em;
+        text-transform: uppercase; color: var(--ivory); opacity: 0.9; padding-left: 0.55em; }
+      .rule { display: block; width: 420px; height: 2px; margin: 34px 0 30px;
+        background: linear-gradient(90deg, rgba(243,196,106,0), var(--gold), rgba(243,196,106,0)); }
+      .title { font-weight: 600; font-style: italic; font-size: 148px; line-height: 1.02; color: var(--ivory); text-align: center;
+        text-shadow: 0 0 40px rgba(255,200,120,0.4), 0 3px 22px rgba(10,6,30,0.6); }
+      .title .gold { color: var(--gold); }
+      .sub { font-family: "Montserrat", sans-serif; font-weight: 300; font-size: 26px; letter-spacing: 0.4em; text-transform: uppercase;
+        margin-top: 40px; color: var(--ivory); opacity: 0.7; padding-left: 0.4em; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="${DURATION}" data-width="${W}" data-height="${H}">
+      <div id="atmosphere" class="clip" data-start="0" data-duration="${DURATION}" data-track-index="0">
+        <div id="bg-night" class="layer"></div>
+        <div id="bg-dawn" class="layer"></div>
+        <div id="bg-gold" class="layer"></div>
+        <div id="bg-candle" class="layer"></div>
+        <div id="rays-layer" class="layer"><div id="rays-wrap"><div id="rays"></div></div></div>
+        <div id="cross-layer" class="layer"><div id="cross"><div class="beam halo"></div><div class="beam v"></div><div class="beam h"></div></div></div>
+        <div id="heart-layer" class="layer"><div id="heart-glow-wrap"><div id="heart-glow"></div></div></div>
+        <div id="motes" class="layer">
+${motes.map((m) => `          <div class="mote" id="mote-${m.i}" style="left:${m.x}px;width:${m.size}px;height:${m.size}px;opacity:${m.alpha};box-shadow:0 0 ${(m.size * 1.6 + m.blur * 3).toFixed(1)}px ${(m.size * 0.5).toFixed(1)}px rgba(255,205,130,0.55)"></div>`).join("\n")}
+        </div>
+        <div id="vignette" class="layer"></div>
+        <div id="fade-black" class="layer" style="background:#000;opacity:0"></div>
+      </div>
+
+      <div id="intro-card" class="clip card" data-start="0" data-duration="${INTRO_END}" data-track-index="2">
+        <div class="card-inner" id="intro-inner">
+          <div class="kicker" id="intro-artist">${esc(song.artist)}</div>
+          <div class="rule" id="intro-rule"></div>
+          <div class="title" id="intro-title"><span class="gold">Jesus,</span> You're My One Thing</div>
+          <div class="sub" id="intro-sub">Lyric Video</div>
+        </div>
+      </div>
+
+${lines.map(lineHtml).join("\n")}
+
+      <div id="outro-card" class="clip card" data-start="${OUTRO_START}" data-duration="${(DURATION - OUTRO_START).toFixed(3)}" data-track-index="2">
+        <div class="card-inner" id="outro-inner">
+          <div class="title" id="outro-title"><span class="gold">Jesus,</span> You're My One Thing</div>
+          <div class="rule" id="outro-rule"></div>
+          <div class="kicker" id="outro-artist">${esc(song.artist)}</div>
+        </div>
+      </div>
+
+
+      <audio id="el-bgm" src="assets/bgm.mp3" data-start="0" data-duration="${DURATION}" data-track-index="11" data-volume="1" data-timeline-role="music"></audio>
+    </div>
+
+    <script>
+      const D = ${JSON.stringify(data)};
+      const tl = gsap.timeline({ paused: true });
+
+      // --- mood cross-fades between sections
+      const layerEl = { dawn: "#bg-dawn", gold: "#bg-gold", candle: "#bg-candle", rays: "#rays-layer", cross: "#cross-layer", heart: "#heart-layer" };
+      D.LAYERS.forEach((k) => gsap.set(layerEl[k], { opacity: D.MOODS.intro[k] }));
+      for (let i = 1; i < D.moodMarks.length; i++) {
+        const [t, mood] = D.moodMarks[i];
+        const prev = D.MOODS[D.moodMarks[i - 1][1]];
+        const next = D.MOODS[mood];
+        const fade = mood === "chorus" ? 1.6 : 3.2;
+        D.LAYERS.forEach((k) => {
+          if (prev[k] === next[k]) return;
+          tl.fromTo(layerEl[k], { opacity: prev[k] }, { opacity: next[k], duration: fade, ease: "sine.inOut", immediateRender: false }, Math.max(0, t - fade * 0.4));
+        });
+      }
+      // --- slow, continuous motion
+      tl.fromTo("#rays", { rotation: -10 }, { rotation: 14, duration: D.DURATION, ease: "none" }, 0);
+      tl.fromTo("#cross", { y: 30 }, { y: -10, duration: D.DURATION, ease: "none" }, 0);
+      const wrapY = gsap.utils.wrap(-${H + 120}, 0);
+      D.motes.forEach((m) => {
+        const y0 = -m.phase * ${H + 120};
+        const travel = (D.DURATION / m.speed) * ${H + 120};
+        tl.fromTo("#mote-" + m.i, { y: y0, x: 0 }, {
+          y: y0 - travel, x: m.drift, duration: D.DURATION, ease: "none",
+          modifiers: { y: (v) => wrapY(parseFloat(v)) + "px" },
+        }, 0);
+      });
+
+      // --- heartbeat: lub-dub on the glow behind the lyrics
+      D.heartbeats.forEach((b) => {
+        tl.fromTo("#heart-glow", { scale: 1 }, { scale: 1.09, duration: 0.08, ease: "power2.out", immediateRender: false }, b);
+        tl.to("#heart-glow", { scale: 1.0, duration: 0.14, ease: "power1.in" }, b + 0.08);
+        tl.to("#heart-glow", { scale: 1.05, duration: 0.07, ease: "power2.out" }, b + 0.24);
+        tl.to("#heart-glow", { scale: 1.0, duration: 0.3, ease: "sine.inOut" }, b + 0.31);
+      });
+
+      // --- intro card
+      tl.fromTo("#intro-artist", { opacity: 0, y: 18 }, { opacity: 0.9, y: 0, duration: 1.6, ease: "power2.out" }, 1.0);
+      tl.fromTo("#intro-rule", { scaleX: 0 }, { scaleX: 1, duration: 1.8, ease: "power2.inOut" }, 1.6);
+      tl.fromTo("#intro-title", { opacity: 0, y: 30, filter: "blur(14px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 2.4, ease: "power2.out" }, 2.2);
+      tl.fromTo("#intro-sub", { opacity: 0 }, { opacity: 0.7, duration: 1.6, ease: "sine.out" }, 4.2);
+      tl.fromTo("#intro-inner", { scale: 1 }, { scale: 1.05, duration: D.INTRO_END, ease: "none" }, 0);
+      tl.fromTo("#intro-inner", { opacity: 1 }, { opacity: 0, duration: 1.6, ease: "sine.in", immediateRender: false }, D.INTRO_END - 1.7);
+
+      // --- lyric lines
+      D.lines.forEach((l) => {
+        const words = document.querySelectorAll("#ly-" + l.idx + " .w");
+        const dur = l.end - l.start;
+        tl.fromTo(words, { opacity: 0, y: 26, filter: "blur(10px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.62, ease: "power2.out", stagger: 0.075 }, l.start);
+        tl.fromTo("#lw-" + l.idx, { scale: 0.985 }, { scale: 1.03, duration: dur, ease: "none" }, l.start);
+        if (l.ecg) {
+          const p = document.getElementById("ecg-" + l.idx);
+          const len = p.getTotalLength();
+          p.style.strokeDasharray = len;
+          tl.fromTo(p, { strokeDashoffset: len, opacity: 1 }, { strokeDashoffset: 0, duration: 1.3, ease: "power1.inOut" }, l.start + 0.5);
+        }
+        const out = Math.min(0.45, dur * 0.25);
+        tl.fromTo("#lw-" + l.idx, { opacity: 1 }, { opacity: 0, y: -14, filter: "blur(6px)", duration: out, ease: "sine.in", immediateRender: false }, l.end - out);
+      });
+
+      // --- outro card
+      const O = D.OUTRO_START;
+      tl.fromTo("#outro-title", { opacity: 0, y: 24, filter: "blur(12px)" }, { opacity: 1, y: 0, filter: "blur(0px)", duration: 1.4, ease: "power2.out" }, O + 0.1);
+      tl.fromTo("#outro-rule", { scaleX: 0 }, { scaleX: 1, duration: 1.2, ease: "power2.inOut" }, O + 0.6);
+      tl.fromTo("#outro-artist", { opacity: 0 }, { opacity: 0.9, duration: 1.0, ease: "sine.out" }, O + 1.0);
+      tl.fromTo("#outro-inner", { opacity: 1 }, { opacity: 0, duration: 1.0, ease: "sine.in", immediateRender: false }, D.DURATION - 1.1);
+      tl.fromTo("#fade-black", { opacity: 0 }, { opacity: 1, duration: 1.4, ease: "sine.in", immediateRender: false }, D.DURATION - 1.5);
+      tl.fromTo("#fade-black", { opacity: 1 }, { opacity: 0, duration: 1.2, ease: "sine.out" }, 0);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
+`;
+
+writeFileSync(new URL("./index.html", import.meta.url), html);
+console.log(`index.html written: ${lines.length} lyric lines, ${heartbeats.length} heartbeats, ${DURATION}s`);
